@@ -20,6 +20,8 @@ library(devtools)
 library(uuid)
 library(digest)
 library(ggplot2)
+library(gtable)
+library(grid)
 ```
 
 ## \textcolor{blue}{Exercises}
@@ -27,7 +29,7 @@ library(ggplot2)
 
 ### Exercise 1
   Below we can see the plot of US GDP in Trillions. As we can see there are not any obvious indicators for seasonality and/or cyclicity, since it resembles a line that steadily increases. The trend is an increasing one.
-```{r,warning=FALSE}
+```{r,warning=FALSE, message=FALSE}
 
 USD_economy = global_economy %>% filter(Code == "USA") %>% mutate(GDP = GDP/1000000000000)
 autoplot(USD_economy) + labs(title = "USA GDP In Trillions", subtitle = "By Year")
@@ -59,10 +61,14 @@ autoplot(livestockCountVictoria, Count) +
 
 ### Exercise 2
 
-
-```{r,warning=FALSE}
+  We summarised the Turnover for all of the states and filtered for Takeaway food services
+```{r,warning=FALSE,fig.height=4}
 filteredAusRetail =  aus_retail %>% filter(
-  Industry == "Takeaway food services", State == "Australian Capital Territory")
+  Industry == "Takeaway food services")  %>%   
+  summarise(Turnover = sum(Turnover))
+
+
+
 train = filteredAusRetail %>% slice(0:47- n())
 test = filteredAusRetail %>% slice(n()-47 : 0 )
 modelFit = train %>%  model(
@@ -74,8 +80,7 @@ modelFit = train %>%  model(
 turnoverForecast = modelFit %>% forecast(h=48)
 turnoverForecast %>% autoplot(train)
 ```
-  Our dataset uses as time window months, so in order to get the last 4 years, we have sliced the last 48 entries, which correspond to 4 years, we opted not to transform our dataset here because the variance does not appear to increase or decrease with time. We then fitted our model using training data and applied 4 benchmark methods, namely Naive, Seasonal Naive, Mean and Drift to create some basic and simple forecasts, which we can see plotted in the graph above, along with their prediction intervals(80%,95%).Drift and Naive seem to overlap in our forecasts.
-  In order to find the accuracy of our predictions we need to 
+  Our dataset uses as time window months, so in order to get the last 4 years, we have sliced the last 48 entries, which correspond to 4 years, we opted not to transform our dataset here because the variance does not appear to increase or decrease with time. We then fitted our model using training data and applied 4 benchmark methods, namely Naive, Seasonal Naive, Mean and Drift to create some basic and simple forecasts, which we can see plotted in the graph above, along with their prediction intervals(80%,95%).
   
 ```{r,warning=FALSE}
 
@@ -83,14 +88,14 @@ accuracy(turnoverForecast,filteredAusRetail)
 
 
 ```
-  First we will take a look out our scale dependant errors like RMSE and MAE, for these errors Drift perform the best since it produces the smallest error in our scale (Turnover scale in this scenario). For percentage errors (MAPE) and scaled errors (MASE, RMSSE) the same conclusion is to be made, since again Drift produces the smallest differences. Hence we can conclude that Drift is the benchmark methods that forecast the best for our model. 
+  First we will take a look out our scale dependant errors like RMSE and MAE, for these errors Naive perform the best since it produces the smallest error in our scale (Turnover scale in this scenario). For percentage errors (MAPE) and scaled errors (MASE, RMSSE) the same conclusion is to be made, since again Drift produces the smallest differences. Hence we can conclude that Drift is the benchmark methods that forecast the best for our model. 
   We will perform some residual diagnostics to assess how well our forecasts have captured the data they are supposed to forecast. The innovation residuals do not have homoscedasticity since towards the tail, the part we forecasted in fact, they appear to express increasing variance. Their autocorrelation apart from seemingly showing some small correlation, also have values that are well above our confidence intervals. Their distribution also could not be characterized as normal since the left and the right tail are way too long. From the above we can reject that our residuals are a realization of a white noise process, which means that our forecasting method still has more improvements.    
 
 
-```{r,warning=FALSE}
+```{r,warning=FALSE,fig.height=4}
 
 filteredAusRetail %>%
-  model(RW(Turnover ~ drift())) %>%
+  model(`Naïve` = NAIVE(Turnover)) %>%
   gg_tsresiduals()
 
 
@@ -101,14 +106,14 @@ filteredAusRetail %>%
 ### Exercise 3
   Below we can see the winning times plotted against each year measured in seconds for each course, categorized by gender and measured in seconds. As we can see, the winning time has a slight declining trend although there appears to be some gaps in our datasets, possibly due to the world wars in these eras. 
 
-```{r,warning=FALSE}
+```{r,warning=FALSE,fig.height=4}
 autoplot(olympic_running)+ labs(title = "Winning time by gender, distance", 
                                 subtitle = "In seconds") 
 
 ```
   We will try and fit a regression line to each event, below we can see the fitted lines for men with regards to each distance
   
-```{r,warning=FALSE}
+```{r,warning=FALSE, echo=FALSE, fig.height=4, message=FALSE}
 men = olympic_running %>% filter(Sex == "men")
 women = olympic_running %>% filter(Sex == "women")
 
@@ -122,7 +127,7 @@ men %>% select(-Sex) %>% ggplot(aes(x =Year, y= Time, color = Length))  +
 
 
 
-```{r,warning=FALSE}
+```{r,warning=FALSE, echo=FALSE,fig.height=4,message=FALSE}
 women %>% select(-Sex) %>% ggplot(aes(x =Year, y= Time, color = Length))  + 
   geom_point() + geom_smooth(method = "lm",se=FALSE) + facet_grid(Length ~ ., scales = "free_y") + 
   labs(y="Times(s)", title="Women") + guides(colour = "none")
@@ -130,22 +135,29 @@ women %>% select(-Sex) %>% ggplot(aes(x =Year, y= Time, color = Length))  +
 ```
   In order to get the rate of change for each year, all we have to do is find the slope of our fitted lines. An indication as to how we can find this , is shown below, due to repetitiveness the rest of the code can be found in the appendix.
   
-```{r,,warning=FALSE}
+```{r,,warning=FALSE,eval=FALSE}
 olympic_running %>% filter(Sex == "men", Length == 100) %>% 
   model(TSLM(Time ~ Year)) %>%
-  coefficients()
+  coefficients() %>% filter(term == "Year") %>% select(estimate) 
 ```
 
 For 100m : Times for men are decreasing at a rate of 0.012 and 0.014 for women each year
+
 For 200m : Times for men are decreasing at a rate of 0.024 and 0.033 for women each year
+
 For 400m : Times for men are decreasing at a rate of 0.064 and 0.04 for women each year
-For 800m : Times for men are decreasing at a rate of 0.151 and 0.0197 for women each year
+
+For 800m : Times for men are decreasing at a rate of 0.151 and 0.197 for women each year
+
 For 1500m : Times for men are decreasing at a rate of 0.315 and increasing at a rate of 0.146 for women each year
+
 For 5000m : Times for men are decreasing at a rate of 1.029 and 0.303 for women each year
+
 For 10000m : Times for men are decreasing at a rate of 2.665 and 3.49 for women each year
 
+
   Below we can see that the residuals for men appear random and do not have big values, except for the distances 1500,5000 and 10000 where the residuals have big values. This could be due to the fact that we do not have enough data points for a more accurate fit.
-```{r,warning=FALSE}
+```{r,warning=FALSE,echo=FALSE,fig.height=4}
 
 
 men %>% filter(Length == 100| Length == 200| Length == 400 | Length == 800 | 
@@ -158,7 +170,8 @@ men %>% filter(Length == 100| Length == 200| Length == 400 | Length == 800 |
 ```
 
   While for women our residuals express the same behaviour as above, where 1500, 5000 and 10000 meters have residuals with very big values. There are some residuals that we could deem problematic in the 800m distance, but since most of them are around the [-1,1] range we could say that this is an okay model, but not perfect.
-```{r,warning=FALSE}
+  
+```{r,warning=FALSE,echo=FALSE,fig.height=4}
 
 
 women %>% filter(Length == 100| Length == 200| Length == 400 | Length == 800 | 
@@ -170,10 +183,28 @@ women %>% filter(Length == 100| Length == 200| Length == 400 | Length == 800 |
 
 ```
 
+  Below we can see the prediction intervals for 95% confidence interval for the next olympic games in 2020. Which means that we are 95% confident that the next best time is going to be between [10.1,11] for 100m, [20.1,22.4] for 200m, [46.1,50.9] for 400m, [105,118] for 800m, [234,257] for 1500m, [824,974] for 5km and [1720,1810] for 10km. These interval bounds are given as approximation due to the fact that we can not discern with great detail the intervals, if we plotted each one on its own we could have a better idea.
+  
+```{r,warning=FALSE,echo=FALSE,fig.height=4}
 
+womenFiltered = women %>%  filter(Length == 100 | Length == 200 | Length == 400 | 
+                    Length == 800 | Length == 1500 | Length == 5000 |
+                    Length == 10000)
+women %>%  filter(Length == 100 | Length == 200 | Length == 400 | 
+                    Length == 800 | Length == 1500 | Length == 5000 |
+                    Length == 10000) %>%  model(TSLM(Time ~ Year)) %>% forecast(h=1)  %>%  autoplot(womenFiltered)+ facet_wrap(~Length, scales = "free")
+```
+  As for men the next best time is going to be between [9.1,10] for 100m, [18.5,19.8] for 200m, [40,44] for 400m, [93,106] for 800m, [200,225] for 1500m, [745,809] for 5km and [1525,1650] for 10km. These interval bounds are given as approximation due to the fact that we can not discern with great detail the intervals, if we plotted each one on its own we could have a better idea.
+```{r,warning=FALSE,echo=FALSE,fig.height=4}
 
-
-
+menFiltered = men %>%  filter(Length == 100 | Length == 200 | Length == 400 | 
+                    Length == 800 | Length == 1500 | Length == 5000 |
+                    Length == 10000)
+men %>%  filter(Length == 100 | Length == 200 | Length == 400 | 
+                    Length == 800 | Length == 1500 | Length == 5000 |
+                    Length == 10000) %>%  model(TSLM(Time ~ Year)) %>% forecast(h=1)  %>%  autoplot(menFiltered)+ facet_wrap(~Length, scales = "free")
+```
+  We have assumed that the relationship between Time and Year to be linear, observations are independent of each other. We have also assumed, even though it is incorrect, that the homoscedasticity of the residuals is the same for every value of X and Normality. If we were given the option as to which models to forecast, we would not have selected the models whose residuals expressed heteroscedasticity
 
 
 
@@ -208,57 +239,56 @@ women %>% filter(Length == 100| Length == 200| Length == 400 | Length == 800 |
 
 olympic_running %>% filter(Sex == "women", Length == 100) %>% 
   model(TSLM(Time ~ Year)) %>%
-  report()
+  coefficients() %>% filter(term == "Year") %>% select(estimate) 
 
 olympic_running %>% filter(Sex == "women", Length == 200) %>% 
   model(TSLM(Time ~ Year)) %>%
-  report()
+  coefficients() %>% filter(term == "Year") %>% select(estimate) 
 
 olympic_running %>% filter(Sex == "women", Length == 400) %>% 
   model(TSLM(Time ~ Year)) %>%
-  report()
+  coefficients() %>% filter(term == "Year") %>% select(estimate) 
 
 olympic_running %>% filter(Sex == "women", Length == 800) %>% 
   model(TSLM(Time ~ Year)) %>%
-  report()
+  coefficients() %>% filter(term == "Year") %>% select(estimate) 
 
 olympic_running %>% filter(Sex == "women", Length == 1500) %>% 
   model(TSLM(Time ~ Year)) %>%
-  report()
+  coefficients() %>% filter(term == "Year") %>% select(estimate) 
 
 olympic_running %>% filter(Sex == "women", Length == 5000) %>% 
   model(TSLM(Time ~ Year)) %>%
-  report()
+  coefficients() %>% filter(term == "Year") %>% select(estimate) 
 
 olympic_running %>% filter(Sex == "women", Length == 10000) %>% 
   model(TSLM(Time ~ Year)) %>%
-  report()
+  coefficients() %>% filter(term == "Year") %>% select(estimate) 
 
 olympic_running %>% filter(Sex == "men", Length == 200) %>% 
   model(TSLM(Time ~ Year)) %>%
-  report()
+  coefficients() %>% filter(term == "Year") %>% select(estimate) 
 
 olympic_running %>% filter(Sex == "men", Length == 400) %>% 
   model(TSLM(Time ~ Year)) %>%
-  report()
+  coefficients() %>% filter(term == "Year") %>% select(estimate) 
 
 olympic_running %>% filter(Sex == "men", Length == 800) %>% 
   model(TSLM(Time ~ Year)) %>%
-  report()
+  coefficients() %>% filter(term == "Year") %>% select(estimate) 
 
 olympic_running %>% filter(Sex == "men", Length == 1500) %>% 
   model(TSLM(Time ~ Year)) %>%
-  report()
+  coefficients() %>% filter(term == "Year") %>% select(estimate) 
 
 olympic_running %>% filter(Sex == "men", Length == 5000) %>% 
   model(TSLM(Time ~ Year)) %>%
-  report()
+  coefficients() %>% filter(term == "Year") %>% select(estimate) 
 
 olympic_running %>% filter(Sex == "men", Length == 10000) %>% 
   model(TSLM(Time ~ Year)) %>%
-  report()
+  coefficients() %>% filter(term == "Year") %>% select(estimate) 
 
-olympic_running
 ```
 
 
