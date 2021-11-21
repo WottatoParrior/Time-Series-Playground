@@ -1,0 +1,270 @@
+---
+title: "Assignment 2"
+author:
+  Christopher Bovolos (st.number 13979582)
+date: "21 November 2021"
+output:
+  pdf_document: default
+  word_document: default
+fontsize: 11pt
+highlight: tango
+---
+```{r, echo=FALSE,message=FALSE}
+library(fpp3)
+library(repr)
+library(IRdisplay)
+library(evaluate)
+library(crayon)
+library(pbdZMQ)
+library(devtools)
+library(uuid)
+library(digest)
+library(ggplot2)
+library(gtable)
+library(grid)
+
+```
+
+## \textcolor{blue}{Exercises}
+
+
+### Exercise 1
+
+  As we can see from the plot of the Afghan population below, we can discern 3 major cycles. One with a slight upward trend until 1980, one with a small downward trend until 1986 and a big cycle with a big upward trend until 2017. The downward trend can be attributed to the Soviet-Afghan war which started in 1979 and lasted until 1989 with 150k to 180k estimated casualties according to Giustozzi Antonio's book War, Politics and Society in Afghanistan, 1978-1922. From a first look, we could argue that we expect the population of Afghanistan to continue to raise in the next years, unless a serious event happens.
+  
+```{r, message=FALSE, echo = FALSE}
+global_economy %>% filter(Code == "AFG") %>% select(Population) %>% autoplot()
+
+```
+  
+  Next we will try to fit a linear model and a piecewise linear model and compare them. As we can see in the plot below the linear model fails to capture properly the downward part which corresponds to the war, while the piecewise linear one is a significant improvement in that regard.
+  
+ As a result the linear model produces forecasts with a very big prediction intervals for 95% Confidence interval, while the piecewise linear model offers a prediction with very tight prediction intervals. In fact it predicts correctly the current population of Afghanistan which is 38.93m according to the worldbank.org .
+
+
+```{r, echo = FALSE, message = FALSE}
+filteredForAfg = global_economy %>% filter(Code == "AFG") %>% select(Population)
+fitted = filteredForAfg %>%  model(linear = TSLM(Population ~ Year), 
+                                  piecewise = TSLM(Population ~ trend(knots = c(1980, 1989))))
+forecasts = fitted %>%  forecast(h=5)
+
+filteredForAfg %>%  autoplot() + 
+  geom_line(data = fitted(fitted),aes(y=.fitted,colour = .model)) + 
+  autolayer(forecasts, level = 95,) + labs(title = "Linear and piecewise models", subtitle = "Fits and forecasts")
+
+```
+
+
+### Exercise 2
+
+  The series on the plot regarding the arrivals from New Zealand expresses varying seasonality in regards to time, meaning that the variance of seasonality increases or decreases according to the levels of the series and is not constant. The trend seems to be an increasing one from the start towards the end, while for cyclity we could argue that there are 2 cycles that we can discern in our time series, a small one starting from 1980 up to 1985 and a bigger one starting in 1985 up to the point where our data ends. It is also non-stationary.
+
+```{r , message=FALSE, echo = FALSE}
+filteredArrivals = aus_arrivals %>% filter(Origin == "NZ")
+autoplot(filteredArrivals)
+```
+
+
+
+
+  We will split our data set by withholding the last 8 observations(Quarters), in order to separate the data of the last 2 years in our set. In order to use Holt-Winter's multiplicative method we will use an exponential smoothing model with Multiplicative Errors, Additive Trend and Multiplicative Seasonality. Our exponential model seems to have captured accurately the seasonality of the model, but the multiplicative nature of the model has created a bit large prediction intervals which we expect to only get worse as we forecast more into the future, but overall it seems like a good prediction. We can also plot the test set along with our predictions and see that our predictions closely follows the real data, in case we would want a more thorough review we could check the residuals and get a better insight. As stated earlier the multiplicative model makes more sense since the seasonality of the model is not constant and varies along the time series. Again because we are using a multiplicative model, the further into the future we predict, the bigger our Prediction Interval becomes, that is also a potential reason as to why our last prediction is different than our last actual observation.
+```{r, message = FALSE}
+testSet = filteredArrivals %>% slice(n()-7:0)
+trainSet = filteredArrivals %>%  slice(0 : 7-n())
+
+fitArrivals = trainSet %>%  model(ETS(Arrivals ~ error("M") + trend("A") + season("M")))
+forecastArrivals = fitArrivals %>% forecast(h=8)
+forecastArrivals %>% autoplot(trainSet, level=95) + autolayer(testSet)
+
+```
+  We will now predict the last 2 years using a multiplicative ETS model, an additive ETS model applied to a log transformed model, a seasonal Naive model and an STL decomposition applied to the log transformed data followed by an ETS models to the seasonally adjusted model. We use window periodic when decomposing the timeseries, because the seasonality is identical across the years, also we use the robust version which is more resistant to any outliers.
+
+```{r, message = FALSE}
+
+
+
+# Plot everything together
+trainSet %>%   model(ETSMult = ETS(  Arrivals ~ error("M") + trend("A") +
+                                              season("M")),
+                     ETSAdd = ETS(log(Arrivals) ~ error("A") + 
+                                                 trend("A") + season("A")),
+                     SNAIVE = SNAIVE(Arrivals),
+                     STLF = decomposition_model(
+  STL(Arrivals ~ season(window = "periodic"), robust = TRUE),ETS(season_adjust))) %>% 
+              forecast(h=4) %>%  autoplot(trainSet,level =95) + 
+  facet_wrap(~.model, scales = "free")
+  
+
+
+```
+
+
+
+
+
+
+
+
+
+  From a first look all of our models look pretty similar and they all seem to have captured well the seasonality and the trend of our series. What's left to do, is to compare our models by looking at the accuracy scores they produce. The errors seems to be the smallest for our simple ETS() model and our STL decomposed one. We will check the residuals of both models in order to get a better look and base our decision on that.
+  
+```{r, echo=FALSE, message=FALSE, warning=FALSE, fig.height=4}
+fittedEts = trainSet %>% model( ETSMult = ETS(  Arrivals ~ error("M") + trend("A") +
+                                              season("M")))
+
+fittedEtsAdd = trainSet %>% model(ETSAdd = ETS(log(Arrivals) ~ error("A") +
+                                                 trend("A") + season("A")))
+
+fittedSnaive = trainSet %>% model(SNAIVE = SNAIVE(Arrivals))
+
+fittedSuper = trainSet %>% model(STLF = decomposition_model(
+  STL(Arrivals ~ season(window = "periodic"), robust = TRUE),ETS(season_adjust) ))
+forecastsEts = fittedEts %>% forecast(h=8)
+forecastsEtsAdd = fittedEtsAdd %>% forecast(h=8)
+forecastsSnaive = fittedSnaive %>% forecast(h=8)
+forecastsSuper = fittedSuper %>% forecast(h=8)
+bind_rows(accuracy(forecastsEts,filteredArrivals),accuracy(
+  forecastsEtsAdd,filteredArrivals),accuracy(forecastsSnaive,filteredArrivals),
+  accuracy(forecastsSuper,filteredArrivals))
+
+
+fittedSuper %>% gg_tsresiduals()
+fittedEts %>% gg_tsresiduals()
+
+  
+
+```
+  As we can see from the plotted residuals, the simple ETS model , is able to capture the information of our data better since the distribution of the residuals resemble white noise albeit their tails being a bit stretched, while the STL model residual distribution would be more comparable to a chi square distribution. In addition, the residuals for the last 2 years are much smaller for the ETS model compared to the STL one, so the best model for our data would be the simple ETS() one. The ACF plot also suggests the ETS one to be better since it has no values that exceed the critical range and more importantly a simple model is better than a more complex one.
+  
+  
+```{r, message = FALSE, echo=TRUE, warning=FALSE}
+filtered_tr <- as_tsibble(filteredArrivals) %>%
+  stretch_tsibble(.init = 4, .step = 1)
+
+
+fittedEts = filtered_tr %>% model(ETS = ETS(log(Arrivals) ~ error("M") + 
+                                              trend("A") + season("M"))) %>% 
+  forecast(h=8)
+
+accEts = fittedEts %>% accuracy(filteredArrivals)
+
+fittedEtsAdd = filtered_tr %>% model(ETSAdd = ETS(log(Arrivals) ~ error("A") + 
+                                                    trend("A") + season("A")))%>% 
+  forecast(h=8)
+
+accEtsAdd = fittedEtsAdd %>% accuracy(filteredArrivals)
+
+fittedSnaive = filtered_tr %>% model(SNAIVE = SNAIVE(Arrivals))%>% forecast(h=8)
+
+accSnaive = fittedSnaive %>% accuracy(filteredArrivals)
+
+fittedSuper = filtered_tr %>% model(STL = decomposition_model(STL(
+  Arrivals ~ season(window = "periodic"), robust = TRUE),ETS(season_adjust) ))%>% 
+  forecast(h=8)
+
+accSuper = fittedSuper %>%  accuracy(filteredArrivals)
+
+
+```
+
+```{r, message = FALSE, echo=FALSE,warning=FALSE}
+bind_rows(accEts,accEtsAdd,accSnaive,accSuper)
+```
+  
+  Again by using cross validation with an initial subset of 4 and step of 1 the STL model and the ETS have the best accuracy metrics, except at the MAPE metric where SNAIVE performs the best and by a small margin. So again we should go with the simpler Multiplicative ETS model since it produces good metrics and is easier to interpret.
+
+### Exercise 3
+
+  We will be using the box cox transformation and obtaining the lambda from the Guerrero method.
+```{r, message = FALSE, warning = FALSE}
+gdp = global_economy %>% filter(Code == "USA") %>% select("GDP")
+lambda <- gdp %>%
+  features(GDP, features = guerrero) %>%
+  pull(lambda_guerrero)
+
+boxCox = gdp %>% mutate(GDP = box_cox(GDP, lambda)) 
+arimaModelAuto = boxCox%>% model(ARIMA()) 
+
+report(arimaModelAuto)
+
+```
+
+ The ARIMA model has decided that the best orders for our data set is (1,1,0) which is 1 order of Autoregression and 1 degree of first differencing, making our model take the form ${y_t = 118.18 + 0.46y_{t-1} + e_t}$ with error being white noise and having a std deviation of ${\sqrt{5479}}$.In order to avoid creating the same model as our first one we will use a (0,1,1) model and a (1,1,1) as experimentation, we will also add a (2,1,0) just to see how it would behave with one more order at p.
+ 
+```{r, message = FALSE, echo = FALSE}
+arimaModel011 = boxCox%>% model("(0,1,1)" = ARIMA(GDP ~ pdq(0,1,1)))
+arimaModel111 = boxCox%>% model("(1,1,1)" = ARIMA(GDP ~ pdq(0,1,1)))
+arimaModel211 = boxCox%>% model("(2,1,1)" = ARIMA(GDP ~ pdq(0,1,1)))
+```
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+report(arimaModelAuto)
+report(arimaModel011)
+report(arimaModel111)
+report(arimaModel211)
+```
+ As we can see from the AICc information criteria all the models we created have the same one, with the smallest one being the one ARIMA found automatically.
+
+```{r, fig.height=3, echo = FALSE}
+arimaModelAuto %>% gg_tsresiduals()   
+```
+  
+```{r}
+augment(arimaModelAuto) %>% features(.innov,ljung_box)
+```
+  
+ 
+  
+  When we do a residual diagnostic the innovation residuals(our series are transformed) values seem to be random with no distinguishable pattern and the ACF values do not extend beyond the critical values, but the distribution does not seem normal. So we run a portmanteu test to be sure that our residuals resemble white noise and indeed the p-value is 0.95 thus the residuals are not distinguishable from white noise series.
+  
+  
+  
+```{r}
+accArima = boxCox %>%
+  slice(-n()) %>%
+  stretch_tsibble(.init = 10) %>%
+  model(ARIMA(GDP)) %>%
+  forecast(h = 1) %>% accuracy(boxCox)
+
+accETS= gdp %>%
+  slice(-n()) %>%
+  stretch_tsibble(.init = 10) %>%
+  model(
+    ETS(GDP),
+  ) %>%
+  forecast(h = 1)%>% accuracy(gdp)
+
+bind_rows(accArima,accEts)
+
+```
+
+
+ When we compare our best ARIMA model applied to the transformed series to an ETS model applied to a non transformed series, we can see that ARIMA produces the smallest amount of errors in every case. We use a cross validation method, where we iterate over 10 data points and predict the 11th.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  
+  
